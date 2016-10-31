@@ -1,0 +1,11 @@
+1. If all traps were directed to the same handler, there would be no way to distinguish between traps, especially if the hardware doesn't push the error code. 
+
+2. 13 is a general protection fault, and 14 is a page fault. Since we prevent user programs from trigerring page faults at will, (by setting permission 0 in setgate), the hardware then issues a trap 13, which is the one we see.
+
+3. If the privilege level was 0 instead of 3, the user code will not be able to trigger the breakpoint because of insufficient privilege levels. It would instead trigger a general protection fault. When we fix it by calling SETGATE with DPL 3, then the correct trap is triggered.
+
+4. The point of this permission mechanism is to prevent user code from being able to arbitrarily call kernel faults at will, that could result in malicious misuse. For example a user program could page fault to intentionally take memory away from other programs. This violates our principles of isolation between virtual envs. 
+
+Challenge Problem
+-----------------
+I implemented the single step and continue functions. To do this, I first had to understand what flags EFLAGS contains. It turns out that bit number 8 of this register is the Trap Flag, which when set would add an int1 automatically after every instruction. This makes it easy to single step in the monitor. My monitor just displays the current instruction pointer and the contents of memory it points to. On stepping, it makes sure the Trap Flag is set and returns from the monitor. By ensuring that all calls return properly, the program automatically continues. For the continue functionality, the monitor does the opposite: it ensures that the bit is cleared before returning. Thus, code was added to monitor.c and monitor.h in the form of mon_step and mon_continue. I also had to handle T_DEBUG traps appopriately, in addition to T_BRKPT, since that is the trap int1 triggers. This was added to trap.c. 

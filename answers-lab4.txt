@@ -1,0 +1,7 @@
+1. If the macro were left out of mpentry.S, then the linker provided address would give us the low address that the code was written for. This doesn't work anymore, because we did a memmove to move our code to a higher artifical address. Futher, the macro lets us add a custom offset for each different processer that we spawn, allowing us to reuse code easily.
+
+2. In the situation where one processor overflows or needs to much memory, it would interfere with the other processors, thus damaging our isolation requirement.
+
+3. e can be properly deferences because the virtual address for e maps to the same physical address in every env, based on the way we have performed memory setup.
+
+4. The part that stores registers is already handled by the trap code, that does this for the current env when a system call occurs (sys_yield is a system call). We need to store these registers to allow user programs to function without needing to save the registers themselves. This is an important abstraction that operating systems provide, making it easier to write user code.

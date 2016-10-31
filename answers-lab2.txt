@@ -1,0 +1,55 @@
+Question 1
+----------
+Since we are dereferencing and using the pointer, the mystery_t should be uintptr_t. 
+
+Question 2
+----------
+
+Entry  |  Base virtual address | Points to
+----------------------------------------
+1023   | 0xffb00000 | Page table for top 4GB of phys memory
+
+   .... Remapped physical memory ...
+
+   960    | 0xf0000000 | KERNBASE /KSTACKTOP (the beginning of kernel virtual address space)
+   959    | 0xefc00000 | the base of the guard page that is followed by the kernel stack
+   958    | 0xef800000 | memory mapped I/O region
+   957    | 0xef400000 | UVPT (the recursive page that holds the actual page directory)
+   956    | 0xef000000 | UPAGES (the page table for the pages PageInfo* data structure)
+
+      .... User memory ...
+
+      1      | 0x00400000 | 
+      0      | 0x00000000 | page table for user memory
+
+      Question 3
+      ----------
+      User programs are in the same address space, but using page permissions (PTE_U) and read/write protection bits (PTE_W) on page directory and table entries allows us to prevent user mode programs from access kernel memory. These checks are actually enforced by the x86 architecture hardware. 
+
+      Question 4
+      ----------
+      We have a 2^32 virtual address space, so we can support 4 GB. 
+
+      Question 5
+      ----------
+      If we have 2^10 = 1024 page tables, and one page directory, each taking a page, then the overhead is 1025*4096 bytes = approx 4 MB. 
+
+      Question 6
+      ----------
+      At the relocated tag at virtual memory 0xf010002f, the eip jumps above KERNBASE. Since this is after we have set up paging, this works because the virtual page at the high address now maps back to the actual physical address. (The page translated virtual address points to the same instruction) This transition is necessary because we are switching to using page translation for virtual addresses before we can enable user process spaces. The physical address would not successfully translate to a page number all the time.
+
+      Challenge problem
+      -----------------
+
+      I wrote 4 functions in monitor.c that help with debugging through the kernel monitor. Their descriptions - 
+
+      showmappings: Prints phsyical page mappings for a given address or address range, along with permission and present bits for each of the pages
+
+      changeperms: Allows a user to set and/or clear permission and present bits for a page or range of pages. The interface is pretty intuitive - for example "changeperms 0x3000 0x5000 +P -W" sets the PTE_P flag and clears any PTE_W flags on the pages 0x3000, 0x4000, 0x5000. 
+
+      dumpv: Prints contents of memory in 32-bit hex chunks for the virtual address or address range provided
+
+      dumpp: Prints contents of memory in 32-bit hex chunks for the physical address or address range provided
+
+      To implement these, I used the pgwalk_dir function that we wrote in the lab earlier, and that is exposed by pmap.h. I wrote a helper function called traversePages that makes it easy to loop over a page range and perform operations on it, for the first two functions. The last two functions make use of the fact that the hardware already has page access enabled, and so we just need to convert any physical addresses to the corresponding virtual addresses.
+
