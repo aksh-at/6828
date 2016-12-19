@@ -1,0 +1,8 @@
+Question 1
+
+I don't, because this is a trapframe register that gets saved and restored properly by code that we have already written before. Since this can only be set by the kernel, we know that unless we change it somewhere else, the same register will be preserved.
+
+Challenge problem
+
+I implemented code to evict blocks that haven't been used recently from the block cache. In the file bc.c, I added a function va_is_recently_used that tells us if the PTE_A flag was not set on the page for this va. To let this give us an idea of which pages are actually in use, this flag is reset periodically for all the blocks. I also added a function free_old_blocks that loops over all the possible blocks, and sees if there are any that are mapped, but haven't been used recently. The corresponding page is unmapped. Dirty blocks are flushed first. Since the universe of all blocksis quite big, this function should either run after every few n disk operations, or by itself in the background.
+

@@ -24,6 +24,7 @@ top:
 	// fork a right neighbor to continue the chain
 	if ((id = fork()) < 0)
 		panic("fork: %e", id);
+
 	if (id == 0)
 		goto top;
 

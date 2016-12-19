@@ -5,3 +5,7 @@
 3. e can be properly deferences because the virtual address for e maps to the same physical address in every env, based on the way we have performed memory setup.
 
 4. The part that stores registers is already handled by the trap code, that does this for the current env when a system call occurs (sys_yield is a system call). We need to store these registers to allow user programs to function without needing to save the registers themselves. This is an important abstraction that operating systems provide, making it easier to write user code.
+
+Challenge 
+---------
+For lab 4, I attempted to do the concurrent matrix multiplication problem. The main challenge here is communicating envids to all processes, since now we are communicating in a matrix and we must know the envids of processes we have not directly spawned. The other challenge is to make sure sends and received are serialized in a way that there is no ambiguity of who the sender was (otherwise we would need an ack and the sender to loop repeatedly,e tc). I figured out the protocl for doing this without ambiguity, but to share envids of all the processes in my matrix, I was using a page that was shared using the sys_ipc_try_send function. This was causing concurrency issues for some reason, and I couldn't debug it without running out of time. 

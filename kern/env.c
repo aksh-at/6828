@@ -236,6 +236,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 	// Set the basic status variables.
 	e->env_parent_id = parent_id;
 	e->env_type = ENV_TYPE_USER;
+	//cprintf("Setting 1 %d \n", e->env_id);
 	e->env_status = ENV_RUNNABLE;
 	e->env_runs = 0;
 
@@ -262,6 +263,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 
 	// Enable interrupts while in user mode.
 	// LAB 4: Your code here.
+	e->env_tf.tf_eflags |= FL_IF;
 
 	// Clear the page fault handler until user installs one.
 	e->env_pgfault_upcall = 0;
@@ -273,7 +275,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 	env_free_list = e->env_link;
 	*newenv_store = e;
 
-	cprintf("[%08x] new env %08x\n", curenv ? curenv->env_id : 0, e->env_id);
+	// cprintf("[%08x] new env %08x\n", curenv ? curenv->env_id : 0, e->env_id);
 	return 0;
 }
 
@@ -403,6 +405,7 @@ load_icode(struct Env *e, uint8_t *binary)
 void
 env_create(uint8_t *binary, enum EnvType type)
 {
+	// LAB 3: Your code here.
 	struct Env *newenv;
 	int r;
 	if((r = env_alloc(&newenv, 0)) < 0) {
@@ -412,6 +415,12 @@ env_create(uint8_t *binary, enum EnvType type)
 	load_icode(newenv, binary);
 
 	newenv->env_type = type;
+
+	// If this is the file server (type == ENV_TYPE_FS) give it I/O privileges.
+	// LAB 5: Your code here.
+	if(type == ENV_TYPE_FS) {
+		newenv->env_tf.tf_eflags |= FL_IOPL_3;
+	}
 }
 
 //
@@ -431,7 +440,7 @@ env_free(struct Env *e)
 		lcr3(PADDR(kern_pgdir));
 
 	// Note the environment's demise.
-	cprintf("[%08x] free env %08x\n", curenv ? curenv->env_id : 0, e->env_id);
+	// cprintf("[%08x] free env %08x\n", curenv ? curenv->env_id : 0, e->env_id);
 
 	// Flush all mapped pages in the user portion of the address space
 	static_assert(UTOP % PTSIZE == 0);
@@ -544,6 +553,7 @@ env_run(struct Env *e)
 	// LAB 3: Your code here.
 
 	if(curenv && (curenv->env_status == ENV_RUNNING) ) {
+		//cprintf("Setting 2 %d\n", curenv->env_id);
 		curenv->env_status = ENV_RUNNABLE;
 	}
 

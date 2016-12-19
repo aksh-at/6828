@@ -613,6 +613,7 @@ mmio_map_region(physaddr_t pa, size_t size)
 	uintptr_t ret = base;
 	base = base + size;
 
+	//cprintf("MMIO mapping address 0x%x\n", ret);
 	return (void *) ret;
 }
 

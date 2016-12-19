@@ -1,0 +1,26 @@
+Question 1
+---------
+I defined a system call called sys_try_send_packet. My e1000_transmit function returns -1 if the ring is full and it cannot transmit a packet right now. If this happens, sys_try_send_packet also returns a negative value. 
+It is up to the helper environment to handle this. output.c tries 50 the system call 50 times, yielding between tries. If it cannot, it drops the packet. The finite limit is there to prevent it from blocking on one packet indefinitely.
+
+Question 2
+---------
+I structured the receive in a parallel way to the send instruction. If the queue is empty, the e1000_receive() function returns -1.  The syscall propagates this value. It is up to the input helper environment to keep polling until it actually receives a 0 value. I understand from the notes that the suggested approach 2 is better in real life, but in our case this is not much of an overhead.
+
+Question 3
+---------
+The web page says "This file came from JOS." There is a marquee below the heading that says "Cheesy web page!".
+
+Question 4
+---------
+It took me approximately 2 days (20 man hours) to finish this lab.
+
+
+Challenge exercise
+---------
+I implemented a 'zero-copy' mechanism on both transmit and recieve ends. For the transmit end, I just had to obtain the pa for the place in memory the user is referring to, and pass it to the device so that it can read from there directly.
+
+The receive side was more complicated. I let the user pass in a void** pointer where they wanted the new va to be stored, provided they have already set apart some memory there. I mapped a new page in the user space, and then used a hacky way to change the pointer using offsets to return an offset in the page that corresponded to teh offset of rx_bufs[i] in the actual kernel memory. This is because the receive buffers have to exist on the kernel side in advance, and we don't know which one is going to correspond to which user offset. 
+
+This works, but it has a few security vulnerabilities that are immediately visible to me.  For example, a user can use the returned pointer address to read all the other packets in the current buffer. Since we only have one input helper, the race conditions are avoided, but we would need something better to deal with race conditions with multiple programs using networking.
+

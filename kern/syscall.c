@@ -3,14 +3,15 @@
 #include <inc/x86.h>
 #include <inc/error.h>
 #include <inc/string.h>
-#include <inc/assert.h>
-
+#include <inc/assert.h> 
 #include <kern/env.h>
 #include <kern/pmap.h>
 #include <kern/trap.h>
 #include <kern/syscall.h>
 #include <kern/console.h>
 #include <kern/sched.h>
+#include <kern/time.h>
+#include <kern/e1000.h>
 
 // Print a string to the system console.
 // The string is exactly 'len' characters long.
@@ -56,10 +57,6 @@ sys_env_destroy(envid_t envid)
 
 	if ((r = envid2env(envid, &e, 1)) < 0)
 		return r;
-	if (e == curenv)
-		cprintf("[%08x] exiting gracefully\n", curenv->env_id);
-	else
-		cprintf("[%08x] destroying %08x\n", curenv->env_id, e->env_id);
 	env_destroy(e);
 	return 0;
 }
@@ -127,6 +124,38 @@ sys_env_set_status(envid_t envid, int status)
 	}
 
 	target_env->env_status = status;
+	return 0;
+}
+
+// Set envid's trap frame to 'tf'.
+// tf is modified to make sure that user environments always run at code
+// protection level 3 (CPL 3) with interrupts enabled.
+//
+// Returns 0 on success, < 0 on error.  Errors are:
+//	-E_BAD_ENV if environment envid doesn't currently exist,
+//		or the caller doesn't have permission to change envid.
+static int
+sys_env_set_trapframe(envid_t envid, struct Trapframe *tf)
+{
+	// LAB 5: Your code here.
+	// Remember to check whether the user has supplied us with a good
+	// address!
+	struct Env *target_env;
+
+	if(envid2env(envid, &target_env, 1) < 0) {
+		cprintf("Bad envid %d passed to envid2env from env_set_trapframe\n", envid);
+		return -E_BAD_ENV;
+	}
+
+	user_mem_assert(target_env, tf, sizeof(struct Trapframe), PTE_W);
+
+	target_env->env_tf = *tf;
+	target_env->env_tf.tf_eflags |= FL_IF;
+	target_env->env_tf.tf_cs |= 0x3;
+	if(target_env->env_type !=  ENV_TYPE_FS) {
+		target_env->env_tf.tf_eflags &= ~FL_IOPL_3;
+	}
+
 	return 0;
 }
 
@@ -344,8 +373,62 @@ sys_page_unmap(envid_t envid, void *va)
 static int
 sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, unsigned perm)
 {
-	// LAB 4: Your code here.
-	panic("sys_ipc_try_send not implemented");
+	struct Env *target_env;
+
+	if(envid2env(envid, &target_env, 0) < 0) {
+		cprintf("Bad env passed to envid2env from sys_ipc_try_send\n");
+		return -E_BAD_ENV;
+	}
+
+	if(!target_env->env_ipc_recving) {
+		return -E_IPC_NOT_RECV;
+	}
+
+	target_env->env_ipc_perm = 0;
+
+	if((uintptr_t)srcva < UTOP) {
+
+		pte_t * src_pte;
+		uintptr_t dstva = (uintptr_t) target_env->env_ipc_dstva;
+
+		if( ((perm & (PTE_U|PTE_P)) != (PTE_U|PTE_P)) || (perm & ~(PTE_AVAIL|PTE_W|PTE_U|PTE_P))) {
+			cprintf("Invalid perms passed to sys_ipc_try_send\n");
+			return -E_INVAL;
+		}
+
+		if( (ROUNDDOWN((uintptr_t)srcva, PGSIZE) != (uintptr_t)srcva)) {
+			cprintf("Non page aligned va passed to sys_ipc_try_send\n");
+			return -E_INVAL;
+		}
+
+		struct PageInfo* pp = page_lookup(curenv->env_pgdir, srcva, &src_pte);
+	
+		if(!pp) {
+			cprintf("srcva not mapped in sys_ipc_try_send\n");
+			return -E_INVAL;
+		}
+
+		if( (!(*src_pte & PTE_W)) & (perm & PTE_W)) {
+			cprintf("cannot set a read-only page to writable in sys_ipc_try_send\n");
+			return -E_INVAL;
+		}
+
+		if(dstva < UTOP)  {
+			if(page_insert(target_env->env_pgdir, pp, (void *)dstva, perm) < 0) {
+				cprintf("page_insert out of memory in sys_ipc_try_send\n");
+				return -E_NO_MEM;
+			}
+			target_env->env_ipc_perm = perm;
+		}
+	}
+
+	target_env->env_ipc_recving = false;
+	target_env->env_ipc_value = value;
+	target_env->env_ipc_from = curenv->env_id;
+	target_env->env_status = ENV_RUNNABLE;
+	target_env->env_tf.tf_regs.reg_eax = 0;
+
+	return 0;
 }
 
 // Block until a value is ready.  Record that you want to receive
@@ -362,9 +445,38 @@ sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, unsigned perm)
 static int
 sys_ipc_recv(void *dstva)
 {
-	// LAB 4: Your code here.
-	panic("sys_ipc_recv not implemented");
+	curenv->env_ipc_recving = true;
+	if((uintptr_t)dstva < UTOP && (ROUNDDOWN((uintptr_t)dstva, PGSIZE) != (uintptr_t)dstva)) {
+		cprintf("Non page aligned va passed to sys_ipc_recv\n");
+		return -E_INVAL;
+	}
+	curenv->env_ipc_dstva = dstva;
+	curenv->env_status = ENV_NOT_RUNNABLE;
+	sched_yield();
 	return 0;
+}
+
+// Return the current time.
+static int
+sys_time_msec(void)
+{
+	// LAB 6: Your code here.
+	return time_msec();
+}
+
+struct packet_buf packet;
+
+static int
+sys_try_send_packet(void * packetva, int size)
+{
+	user_mem_assert(curenv, packetva, size, PTE_U);
+	return e1000_transmit(packetva, size);
+}
+
+static int
+sys_try_recv_packet(void** packet_dst, int* size_store)
+{
+	return e1000_receive(packet_dst, size_store);
 }
 
 // Dispatches to the correct kernel function, passing the arguments.
@@ -399,6 +511,18 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 			return sys_page_unmap((envid_t)a1, (void *) a2);
 		case SYS_env_set_pgfault_upcall:
 			return sys_env_set_pgfault_upcall((envid_t)a1,(void *)a2);
+		case SYS_ipc_try_send:
+			return sys_ipc_try_send((envid_t)a1, (uint32_t) a2, (void *) a3, (unsigned) a4);
+		case SYS_ipc_recv:
+			return sys_ipc_recv((void *) a1);
+		case SYS_env_set_trapframe:
+			return sys_env_set_trapframe((envid_t)a1, (struct Trapframe*)a2);
+		case SYS_time_msec:
+			return sys_time_msec();
+		case SYS_try_send_packet:
+			return sys_try_send_packet((void*)a1, (int)a2);
+		case SYS_try_recv_packet:
+			return sys_try_recv_packet((void**)a1, (int*)a2);
 	default:
 		return -E_INVAL;
 	}

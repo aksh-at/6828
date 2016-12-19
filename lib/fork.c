@@ -29,15 +29,14 @@ pgfault(struct UTrapframe *utf)
 	// LAB 4: Your code here.
 
 	if(!(err & FEC_WR)) {
-		panic("Not a write");
+		panic("0x%x Not a write", addr);
 	}
 
 	if(!(uvpt[PGNUM(addr)] & PTE_COW)) {
 		panic("Not a COW page");
 	}
 
-	// Allocate a new page, map it at a temporary location (PFTEMP),
-	// copy the data from the old page to the new page, then move the new
+	// Allocate a new page, map it at a temporary location (PFTEMP), // copy the data from the old page to the new page, then move the new
 	// page to the old page's address.
 	// Hint:
 	//   You should make three system calls.
@@ -80,10 +79,15 @@ duppage(envid_t envid, unsigned pn)
 	int r = 0;
 	envid_t curenvid = sys_getenvid();
 
-	if(((orig_perms) & PTE_COW) || (orig_perms & PTE_W) ) {
+
+	if(orig_perms & PTE_SHARE) {
+		r += sys_page_map(curenvid, (void *) (pn*PGSIZE), envid, (void *) (pn*PGSIZE), (orig_perms & PTE_SYSCALL));
+
+	} else if(((orig_perms) & PTE_COW) || (orig_perms & PTE_W) ) {
 		r += sys_page_map(curenvid, (void *) (pn*PGSIZE), envid, (void *) (pn*PGSIZE), (orig_perms | PTE_COW) & (~PTE_W));
 
 		r += sys_page_map(curenvid, (void *) (pn*PGSIZE), curenvid, (void *) (pn*PGSIZE), (orig_perms | PTE_COW) & (~PTE_W));
+
 	} else {
 		r = sys_page_map(curenvid, (void *) (pn*PGSIZE), envid, (void *) (pn*PGSIZE), orig_perms);
 	}
@@ -123,7 +127,9 @@ fork(void)
 	}
 
 	for(addr = 0; addr < UTOP - PGSIZE; addr +=PGSIZE) {
-		r += duppage(envid, PGNUM(addr));
+		if(uvpd[PDX(addr)] && PTE_P && uvpt[PGNUM(addr)])  {
+			r += duppage(envid, PGNUM(addr));
+		}
 	}
 
 	r+=sys_page_alloc(envid, (void*)UXSTACKTOP - PGSIZE, PTE_P|PTE_U|PTE_W);
